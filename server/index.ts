@@ -9,7 +9,8 @@ import "dotenv/config";
 const app = express();
 const port = process.env.PORT || 3000;
 app.get("/", async (req: Request, res: Response) => {
-    res.json({ result: await classifyGate() });
+    // Home Assistant binary sensor expects true/false
+    res.json({ result: (await classifyGate()) === "open" ? true : false });
 });
 app.listen(port, () => {
     console.log(`Server running at http://localhost:${port}`);
@@ -22,14 +23,12 @@ async function classifyGate() {
     console.log("got camera image");
 
     // classify
-    const classify = (await detect_objects_on_image(image)) as Record<
-        ClassifyLabels,
-        number
-    >;
+    const classify = await classify_image(image);
 
-    const result = Object.entries(classify).sort((a, b) => b[1] - a[1]);
+    // sort by confidence result descending
+    const result = classify.sort((a, b) => b.confidence - a.confidence);
 
-    return result[0][0];
+    return result[0].classification;
 }
 
 const digestAuth = new AxiosDigestAuth({
@@ -67,16 +66,15 @@ async function get_camera_image() {
 }
 
 // helpers from https://github.com/AndreyGermanov/yolov8_onnx_nodejs/blob/main/object_detector.js
-/**
- * Function receives an image, passes it through YOLOv8 neural network
- * and returns an array of detected objects and their bounding boxes
- * @param buf Input image body
- * @returns Array of bounding boxes in format [[x1,y1,x2,y2,object_type,probability],..]
- */
-async function detect_objects_on_image(img: Buffer) {
+async function classify_image(img: Buffer) {
     const input = await prepare_input(img);
     const output = await run_model({ input });
-    return output;
+
+    const result = Object.entries(output).map(([key, value]) => {
+        return { classification: labels[key], confidence: value };
+    });
+
+    return result;
 }
 
 /**
@@ -119,12 +117,7 @@ async function run_model({ input }: { input: number[] }) {
     const outputs = await model.run({ images: input });
     const data = outputs["output0"].data as Record<string, number>;
 
-    const result = Object.entries(data).map(([key, value]) => {
-        const label = labels[key];
-        return [label, value];
-    });
-
-    return Object.fromEntries(result);
+    return data;
 }
 
 type ClassifyLabels = "closed" | "open";
