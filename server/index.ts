@@ -9,6 +9,8 @@ import "dotenv/config";
 const app = express();
 const port = process.env.PORT || 3000;
 app.get("/", async (req: Request, res: Response) => {
+    logWithTimestamp("request received");
+
     // Home Assistant binary sensor expects true/false
     res.json({ result: (await classifyGate()) === "open" ? true : false });
 });
@@ -18,12 +20,14 @@ app.listen(port, () => {
 
 async function classifyGate() {
     // get image
+    console.time("get_camera_image")
     const image = await get_camera_image();
-
-    console.log("got camera image");
+    console.timeEnd("get_camera_image")
 
     // classify
+    console.time("classify_image")
     const classify = await classify_image(image);
+    console.timeEnd("classify_image")
 
     // sort by confidence result descending
     const result = classify.sort((a, b) => b.confidence - a.confidence);
@@ -44,8 +48,6 @@ async function get_camera_image() {
             responseType: "arraybuffer",
         })
         .then((response) => response.data);
-
-    console.log("downloaded image");
 
     const sharpImage = await sharp(imageBuffer, { failOn: "none" });
 
@@ -73,6 +75,8 @@ async function classify_image(img: Buffer) {
     const result = Object.entries(output).map(([key, value]) => {
         return { classification: labels[key], confidence: value };
     });
+
+    logWithTimestamp(`model result: ${JSON.stringify(result)}`);
 
     return result;
 }
@@ -126,3 +130,7 @@ const labels: Record<string, ClassifyLabels> = {
     "0": "closed",
     "1": "open",
 };
+
+function logWithTimestamp(message: string) {
+    console.log(`[${new Date().toISOString()}] ${message}`);
+}
