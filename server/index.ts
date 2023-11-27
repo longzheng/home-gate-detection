@@ -104,27 +104,17 @@ async function prepare_input(pixels: Buffer) {
  */
 async function run_model({ input }: { input: number[] }) {
     const model = await ort.InferenceSession.create("best.onnx");
-    input = new ort.Tensor(
-        Float32Array.from(input),
-        [
-            1,
-            // 3 channels?
-            3,
-            // width
-            224,
-            // height
-            224,
-        ]
-    );
+    input = new ort.Tensor(Float32Array.from(input), [1, 3, 224, 224]);
     const outputs = await model.run({ images: input });
     const data = outputs["output0"].data as Record<string, number>;
 
-    const result = Object.entries(data).map(([key, value]) => {
-        const label = labels[key];
-        return [label, value];
-    });
+    const result: Record<string, typeof data[keyof typeof data]> = {};
 
-    return Object.fromEntries(result);
+    for (const [key, value] of Object.entries(data)) {
+            result[labels[key]] = value;
+    }
+
+    return result;
 }
 
 type ClassifyLabels = "closed" | "open";
