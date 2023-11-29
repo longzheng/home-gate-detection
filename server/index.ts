@@ -1,33 +1,40 @@
-import express, { Request, Response } from "express";
 // import ort from "onnxruntime-node";
 const ort = require("onnxruntime-node");
 import sharp from "sharp";
 import AxiosDigestAuth from "@mhoc/axios-digest-auth";
+import axios from "axios";
 
 import "dotenv/config";
 
-const app = express();
-const port = process.env.PORT || 3000;
-app.get("/", async (req: Request, res: Response) => {
-    logWithTimestamp("request received");
+const digestAuth = new AxiosDigestAuth({
+    username: process.env.CAMERA_USERNAME!,
+    password: process.env.CAMERA_PASSWORD!,
+});
 
-    // Home Assistant binary sensor expects true/false
-    res.json({ result: (await classifyGate()) === "open" ? true : false });
-});
-app.listen(port, () => {
-    console.log(`Server running at http://localhost:${port}`);
-});
+(async () => {
+    while (true) {
+        try {
+            const classification = await classifyGate();
+            logWithTimestamp(`classification: ${classification}`);
+
+            await updateHomeAssistant(classification);
+            logWithTimestamp(`updated home assistant`);
+        } catch (e) {
+            logWithTimestamp(`error: ${e}`);
+        }
+    }
+})();
 
 async function classifyGate() {
     // get image
-    console.time("get_camera_image")
+    console.time("get_camera_image");
     const image = await get_camera_image();
-    console.timeEnd("get_camera_image")
+    console.timeEnd("get_camera_image");
 
     // classify
-    console.time("classify_image")
+    console.time("classify_image");
     const classify = await classify_image(image);
-    console.timeEnd("classify_image")
+    console.timeEnd("classify_image");
 
     // sort by confidence result descending
     const result = classify.sort((a, b) => b.confidence - a.confidence);
@@ -35,10 +42,24 @@ async function classifyGate() {
     return result[0].classification;
 }
 
-const digestAuth = new AxiosDigestAuth({
-    username: process.env.CAMERA_USERNAME!,
-    password: process.env.CAMERA_PASSWORD!,
-});
+async function updateHomeAssistant(classification: ClassifyLabels) {
+    await axios.post(
+        process.env.HOME_ASSISTANT_URL!,
+        {
+            state: classification === "open" ? "on" : "off",
+            attributes: {
+                device_class: "garage_door",
+                friendly_name: "Driveway gate",
+            },
+        },
+        {
+            headers: {
+                Authorization: `Bearer ${process.env.HOME_ASSISTANT_TOKEN}`,
+                "content-type": "application/json",
+            },
+        }
+    );
+}
 
 async function get_camera_image() {
     const imageBuffer = await digestAuth
