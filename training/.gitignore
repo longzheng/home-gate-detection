@@ -153,4 +153,4 @@ cython_debug/
 runs/
 Gate-open*/
 sample/
-yolov8n-cls.pt
+yolov8*.pt
