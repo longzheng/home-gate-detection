@@ -39,7 +39,10 @@ async function classifyGate() {
     // sort by confidence result descending
     const result = classify.sort((a, b) => b.confidence - a.confidence);
 
-    return result[0].classification;
+    const topResult = result[0];
+    logWithTimestamp(`top result: ${JSON.stringify(topResult)}`);
+
+    return topResult.classification;
 }
 
 async function updateHomeAssistant(classification: ClassifyLabels) {
