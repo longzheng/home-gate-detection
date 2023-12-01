@@ -36,8 +36,18 @@ async function classifyGate() {
     const classify = await classify_image(image);
     console.timeEnd("classify_image");
 
+    // filter out low confidence
+    const confidenceThreshold = 0.8;
+    const filtered = classify.filter(
+        (classification) => classification.confidence > confidenceThreshold
+    );
+
     // sort by confidence result descending
-    const result = classify.sort((a, b) => b.confidence - a.confidence);
+    const result = filtered.sort((a, b) => b.confidence - a.confidence);
+
+    if (result.length === 0) {
+        throw new Error("no confident results");
+    }
 
     const topResult = result[0];
     logWithTimestamp(`top result: ${JSON.stringify(topResult)}`);
