@@ -70,6 +70,7 @@ async function updateHomeAssistant(classification: ClassifyLabels) {
                 Authorization: `Bearer ${process.env.HOME_ASSISTANT_TOKEN}`,
                 "content-type": "application/json",
             },
+            timeout: 10_000,
         }
     );
 }
@@ -80,6 +81,7 @@ async function get_camera_image() {
             method: "GET",
             url: process.env.CAMERA_URL!,
             responseType: "arraybuffer",
+            timeout: 10_000
         })
         .then((response) => response.data);
 
