@@ -1,4 +1,3 @@
-// import ort from "onnxruntime-node";
 const ort = require("onnxruntime-node");
 import sharp from "sharp";
 import AxiosDigestAuth from "@mhoc/axios-digest-auth";
@@ -28,12 +27,12 @@ const digestAuth = new AxiosDigestAuth({
 async function classifyGate() {
     // get image
     console.time("get_camera_image");
-    const image = await get_camera_image();
+    const { croppedImage, croppedImageBuffer } = await get_camera_image();
     console.timeEnd("get_camera_image");
 
     // classify
     console.time("classify_image");
-    const classify = await classify_image(image);
+    const classify = await classify_image(croppedImageBuffer);
     console.timeEnd("classify_image");
 
     // filter out low confidence
@@ -51,6 +50,11 @@ async function classifyGate() {
 
     const topResult = result[0];
     logWithTimestamp(`top result: ${JSON.stringify(topResult)}`);
+
+    if (topResult.classification === 'open' && process.env.SAVE_OPEN_IMAGES === 'true') {
+        // save the image to disk
+        await croppedImage.toFormat('jpeg').toFile(`open-images/${new Date().toISOString().replace(/:/g, '_')}.jpg`);
+    }
 
     return topResult.classification;
 }
@@ -88,19 +92,23 @@ async function get_camera_image() {
     const sharpImage = await sharp(imageBuffer, { failOn: "none" });
 
     // crop image to gate
-    const croppedImageBuffer = await sharpImage
+    const croppedImage = await sharpImage
         .extract({
             left: 2142,
             top: 333,
             width: 585,
             height: 468,
-        })
+        });
+
+    // crop image to gate
+    const croppedImageBuffer = await croppedImage
+        .clone()
         // classify model is hard-coded to 224x224
         .resize({ width: 224, height: 224, fit: "fill" })
         .raw()
         .toBuffer();
 
-    return croppedImageBuffer;
+    return { croppedImageBuffer, croppedImage };
 }
 
 // helpers from https://github.com/AndreyGermanov/yolov8_onnx_nodejs/blob/main/object_detector.js
