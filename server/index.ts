@@ -11,8 +11,7 @@ const digestAuth = new AxiosDigestAuth({
 });
 
 void (async () => {
-    // eslint-disable-next-line no-constant-condition
-    while (true) {
+    for (;;) {
         try {
             const classification = await classifyGate();
             logWithTimestamp(`classification: ${classification}`);
@@ -21,9 +20,9 @@ void (async () => {
             logWithTimestamp(`updated home assistant`);
         } catch (error) {
             if (error instanceof Error) {
-                logWithTimestamp(`error: ${error.message}
-                ${error.stack}`);
-                return;
+                logWithTimestamp(`exception: ${error.message}
+${error.stack}`);
+                continue;
             }
 
             throw error;
