@@ -1,0 +1,5 @@
+services:
+  home-gate-detection:
+    build: .
+    volumes:
+      - ./open-images:/app/open-images
