@@ -1,4 +1,4 @@
-const ort = require("onnxruntime-node");
+import * as ort from "onnxruntime-node";
 import sharp from "sharp";
 import AxiosDigestAuth from "@mhoc/axios-digest-auth";
 import axios from "axios";
@@ -10,7 +10,8 @@ const digestAuth = new AxiosDigestAuth({
     password: process.env.CAMERA_PASSWORD!,
 });
 
-(async () => {
+void (async () => {
+    // eslint-disable-next-line no-constant-condition
     while (true) {
         try {
             const classification = await classifyGate();
@@ -18,8 +19,14 @@ const digestAuth = new AxiosDigestAuth({
 
             await updateHomeAssistant(classification);
             logWithTimestamp(`updated home assistant`);
-        } catch (e) {
-            logWithTimestamp(`error: ${e}`);
+        } catch (error) {
+            if (error instanceof Error) {
+                logWithTimestamp(`error: ${error.message}
+                ${error.stack}`);
+                return;
+            }
+
+            throw error;
         }
     }
 })();
@@ -51,9 +58,16 @@ async function classifyGate() {
     const topResult = result[0];
     logWithTimestamp(`top result: ${JSON.stringify(topResult)}`);
 
-    if (topResult.classification === 'open' && process.env.SAVE_OPEN_IMAGES === 'true') {
+    if (
+        topResult.classification === "open" &&
+        process.env.SAVE_OPEN_IMAGES === "true"
+    ) {
         // save the image to disk
-        await croppedImage.toFormat('jpeg').toFile(`open-images/${new Date().toISOString().replace(/:/g, '_')}.jpg`);
+        await croppedImage
+            .toFormat("jpeg")
+            .toFile(
+                `open-images/${new Date().toISOString().replace(/:/g, "_")}.jpg`
+            );
     }
 
     return topResult.classification;
@@ -85,20 +99,19 @@ async function get_camera_image() {
             method: "GET",
             url: process.env.CAMERA_URL!,
             responseType: "arraybuffer",
-            timeout: 10_000
+            timeout: 10_000,
         })
         .then((response) => response.data);
 
-    const sharpImage = await sharp(imageBuffer, { failOn: "none" });
+    const sharpImage = sharp(imageBuffer, { failOn: "none" });
 
     // crop image to gate
-    const croppedImage = await sharpImage
-        .extract({
-            left: 2142,
-            top: 333,
-            width: 585,
-            height: 468,
-        });
+    const croppedImage = sharpImage.extract({
+        left: 2142,
+        top: 333,
+        width: 585,
+        height: 468,
+    });
 
     // crop image to gate
     const croppedImageBuffer = await croppedImage
@@ -113,11 +126,11 @@ async function get_camera_image() {
 
 // helpers from https://github.com/AndreyGermanov/yolov8_onnx_nodejs/blob/main/object_detector.js
 async function classify_image(img: Buffer) {
-    const input = await prepare_input(img);
+    const input = prepare_input(img);
     const output = await run_model({ input });
 
     const result = Object.entries(output).map(([key, value]) => {
-        return { classification: labels[key], confidence: value };
+        return { classification: labels[key], confidence: value as number };
     });
 
     logWithTimestamp(`model result: ${JSON.stringify(result)}`);
@@ -130,7 +143,7 @@ async function classify_image(img: Buffer) {
  * required as an input to YOLOv8 object detection
  * network.
  */
-async function prepare_input(pixels: Buffer) {
+function prepare_input(pixels: Buffer) {
     const red: number[] = [],
         green: number[] = [],
         blue: number[] = [];
@@ -150,7 +163,7 @@ async function prepare_input(pixels: Buffer) {
  */
 async function run_model({ input }: { input: number[] }) {
     const model = await ort.InferenceSession.create("best.onnx");
-    input = new ort.Tensor(
+    const tensor = new ort.Tensor(
         Float32Array.from(input),
         [
             1,
@@ -162,8 +175,8 @@ async function run_model({ input }: { input: number[] }) {
             224,
         ]
     );
-    const outputs = await model.run({ images: input });
-    const data = outputs["output0"].data as Record<string, number>;
+    const outputs = await model.run({ images: tensor });
+    const data = outputs["output0"].data;
 
     return data;
 }
