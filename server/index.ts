@@ -2,8 +2,8 @@ import * as ort from "onnxruntime-node";
 import sharp from "sharp";
 import AxiosDigestAuth from "@mhoc/axios-digest-auth";
 import axios from "axios";
-
 import "dotenv/config";
+import { readFile } from "fs/promises";
 
 const digestAuth = new AxiosDigestAuth({
     username: process.env.CAMERA_USERNAME!,
@@ -11,9 +11,11 @@ const digestAuth = new AxiosDigestAuth({
 });
 
 void (async () => {
+    const onnxModel = await readFile("best.onnx");
+
     for (;;) {
         try {
-            const classification = await classifyGate();
+            const classification = await classifyGate({ onnxModel });
             logWithTimestamp(`classification: ${classification}`);
 
             await updateHomeAssistant(classification);
@@ -30,7 +32,7 @@ ${error.stack}`);
     }
 })();
 
-async function classifyGate() {
+async function classifyGate({ onnxModel }: { onnxModel: Buffer }) {
     // get image
     console.time("get_camera_image");
     const { croppedImage, croppedImageBuffer } = await get_camera_image();
@@ -38,7 +40,10 @@ async function classifyGate() {
 
     // classify
     console.time("classify_image");
-    const classify = await classify_image(croppedImageBuffer);
+    const classify = await classify_image({
+        img: croppedImageBuffer,
+        onnxModel: onnxModel,
+    });
     console.timeEnd("classify_image");
 
     // filter out low confidence
@@ -124,9 +129,15 @@ async function get_camera_image() {
 }
 
 // helpers from https://github.com/AndreyGermanov/yolov8_onnx_nodejs/blob/main/object_detector.js
-async function classify_image(img: Buffer) {
+async function classify_image({
+    img,
+    onnxModel,
+}: {
+    img: Buffer;
+    onnxModel: Buffer;
+}) {
     const input = prepare_input(img);
-    const output = await run_model({ input });
+    const output = await run_model({ input, onnxModel });
 
     const result = Object.entries(output).map(([key, value]) => {
         return { classification: labels[key], confidence: value as number };
@@ -160,8 +171,14 @@ function prepare_input(pixels: Buffer) {
  * @param input Input pixels array
  * @returns Raw output of neural network as a flat array of numbers
  */
-async function run_model({ input }: { input: number[] }) {
-    const model = await ort.InferenceSession.create("best.onnx");
+async function run_model({
+    input,
+    onnxModel,
+}: {
+    input: number[];
+    onnxModel: Buffer;
+}) {
+    const model = await ort.InferenceSession.create(onnxModel);
     const tensor = new ort.Tensor(
         Float32Array.from(input),
         [
