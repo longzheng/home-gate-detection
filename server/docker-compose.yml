@@ -2,5 +2,7 @@ services:
   home-gate-detection:
     build: .
     volumes:
+      - ./best.onnx:/app/best.onnx
       - ./open-images:/app/open-images
     restart: 'always'
+    env_file: .env
