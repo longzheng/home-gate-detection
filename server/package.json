@@ -4,7 +4,8 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "start": "ts-node -T index.ts"
+    "start": "ts-node -T index.ts",
+    "lint": "tsc --noEmit && npx eslint ."
   },
   "author": "",
   "license": "ISC",
@@ -19,6 +20,7 @@
     "typescript": "^5.4.5"
   },
   "devDependencies": {
+    "@tsconfig/strictest": "^2.0.5",
     "@typescript-eslint/eslint-plugin": "^7.12.0",
     "@typescript-eslint/parser": "^7.12.0",
     "eslint": "^8.57.0",

@@ -1,17 +1,17 @@
-import * as ort from "onnxruntime-node";
-import sharp from "sharp";
-import AxiosDigestAuth from "@mhoc/axios-digest-auth";
-import axios from "axios";
-import "dotenv/config";
-import { readFile } from "fs/promises";
+import * as ort from 'onnxruntime-node';
+import sharp from 'sharp';
+import AxiosDigestAuth from '@mhoc/axios-digest-auth';
+import axios from 'axios';
+import 'dotenv/config';
+import { readFile } from 'fs/promises';
 
 const digestAuth = new AxiosDigestAuth({
-    username: process.env.CAMERA_USERNAME!,
-    password: process.env.CAMERA_PASSWORD!,
+    username: process.env['CAMERA_USERNAME']!,
+    password: process.env['CAMERA_PASSWORD']!,
 });
 
 void (async () => {
-    const onnxModel = await readFile("best.onnx");
+    const onnxModel = await readFile('best.onnx');
 
     for (;;) {
         try {
@@ -34,43 +34,43 @@ ${error.stack}`);
 
 async function classifyGate({ onnxModel }: { onnxModel: Buffer }) {
     // get image
-    console.time("get_camera_image");
+    console.time('get_camera_image');
     const { croppedImage, croppedImageBuffer } = await get_camera_image();
-    console.timeEnd("get_camera_image");
+    console.timeEnd('get_camera_image');
 
     // classify
-    console.time("classify_image");
+    console.time('classify_image');
     const classify = await classify_image({
         img: croppedImageBuffer,
-        onnxModel: onnxModel,
+        onnxModel,
     });
-    console.timeEnd("classify_image");
+    console.timeEnd('classify_image');
 
     // filter out low confidence
     const confidenceThreshold = 0.8;
     const filtered = classify.filter(
-        (classification) => classification.confidence > confidenceThreshold
+        (classification) => classification.confidence > confidenceThreshold,
     );
 
     // sort by confidence result descending
     const result = filtered.sort((a, b) => b.confidence - a.confidence);
 
-    if (result.length === 0) {
-        throw new Error("no confident results");
+    if (result.length === 0 || !result[0]) {
+        throw new Error('no confident results');
     }
 
     const topResult = result[0];
     logWithTimestamp(`top result: ${JSON.stringify(topResult)}`);
 
     if (
-        topResult.classification === "open" &&
-        process.env.SAVE_OPEN_IMAGES === "true"
+        topResult.classification === 'open' &&
+        process.env['SAVE_OPEN_IMAGES'] === 'true'
     ) {
         // save the image to disk
         await croppedImage
-            .toFormat("jpeg")
+            .toFormat('jpeg')
             .toFile(
-                `open-images/${new Date().toISOString().replace(/:/g, "_")}.jpg`
+                `open-images/${new Date().toISOString().replace(/:/g, '_')}.jpg`,
             );
     }
 
@@ -79,35 +79,35 @@ async function classifyGate({ onnxModel }: { onnxModel: Buffer }) {
 
 async function updateHomeAssistant(classification: ClassifyLabels) {
     await axios.post(
-        process.env.HOME_ASSISTANT_URL!,
+        process.env['HOME_ASSISTANT_URL']!,
         {
-            state: classification === "open" ? "on" : "off",
+            state: classification === 'open' ? 'on' : 'off',
             attributes: {
-                device_class: "garage_door",
-                friendly_name: "Driveway gate",
+                device_class: 'garage_door',
+                friendly_name: 'Driveway gate',
             },
         },
         {
             headers: {
-                Authorization: `Bearer ${process.env.HOME_ASSISTANT_TOKEN}`,
-                "content-type": "application/json",
+                Authorization: `Bearer ${process.env['HOME_ASSISTANT_TOKEN']}`,
+                'content-type': 'application/json',
             },
             timeout: 10_000,
-        }
+        },
     );
 }
 
 async function get_camera_image() {
     const imageBuffer = await digestAuth
         .request({
-            method: "GET",
-            url: process.env.CAMERA_URL!,
-            responseType: "arraybuffer",
+            method: 'GET',
+            url: process.env['CAMERA_URL']!,
+            responseType: 'arraybuffer',
             timeout: 10_000,
         })
         .then((response) => response.data);
 
-    const sharpImage = sharp(imageBuffer, { failOn: "none" });
+    const sharpImage = sharp(imageBuffer, { failOn: 'none' });
 
     // crop image to gate
     const croppedImage = sharpImage.extract({
@@ -121,7 +121,7 @@ async function get_camera_image() {
     const croppedImageBuffer = await croppedImage
         .clone()
         // classify model is hard-coded to 224x224
-        .resize({ width: 224, height: 224, fit: "fill" })
+        .resize({ width: 224, height: 224, fit: 'fill' })
         .raw()
         .toBuffer();
 
@@ -140,7 +140,13 @@ async function classify_image({
     const output = await run_model({ input, onnxModel });
 
     const result = Object.entries(output).map(([key, value]) => {
-        return { classification: labels[key], confidence: value as number };
+        const classification = labels[key];
+
+        if (!classification) {
+            throw new Error('unknown classification');
+        }
+
+        return { classification, confidence: value as number };
     });
 
     logWithTimestamp(`model result: ${JSON.stringify(result)}`);
@@ -158,9 +164,21 @@ function prepare_input(pixels: Buffer) {
         green: number[] = [],
         blue: number[] = [];
     for (let index = 0; index < pixels.length; index += 3) {
-        red.push(pixels[index] / 255.0);
-        green.push(pixels[index + 1] / 255.0);
-        blue.push(pixels[index + 2] / 255.0);
+        const redPixel = pixels[index];
+        const greenPixel = pixels[index + 1];
+        const bluePixel = pixels[index + 2];
+
+        if (
+            redPixel === undefined ||
+            greenPixel === undefined ||
+            bluePixel === undefined
+        ) {
+            throw new Error('invalid pixel');
+        }
+
+        red.push(redPixel / 255.0);
+        green.push(greenPixel / 255.0);
+        blue.push(bluePixel / 255.0);
     }
     const input = [...red, ...green, ...blue];
     return input;
@@ -189,19 +207,26 @@ async function run_model({
             224,
             // height
             224,
-        ]
+        ],
     );
     const outputs = await model.run({ images: tensor });
-    const data = outputs["output0"].data;
+
+    const output0 = outputs['output0'];
+
+    if (!output0) {
+        throw new Error('no output0');
+    }
+
+    const data = output0.data;
 
     return data;
 }
 
-type ClassifyLabels = "closed" | "open";
+type ClassifyLabels = 'closed' | 'open';
 
 const labels: Record<string, ClassifyLabels> = {
-    "0": "closed",
-    "1": "open",
+    '0': 'closed',
+    '1': 'open',
 };
 
 function logWithTimestamp(message: string) {
