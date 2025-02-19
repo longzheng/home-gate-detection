@@ -4,5 +4,6 @@ services:
     volumes:
       - ./best.onnx:/app/best.onnx
       - ./open-images:/app/open-images
+      - ./closed-images:/app/closed-images
     restart: 'always'
     env_file: .env

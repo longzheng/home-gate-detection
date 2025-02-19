@@ -74,6 +74,20 @@ async function classifyGate({ onnxModel }: { onnxModel: Buffer }) {
             );
     }
 
+    if (
+        topResult.classification === 'closed' &&
+        process.env['SAVE_CLOSED_IMAGES'] === 'true'
+    ) {
+        // random chance to save closed image
+        if (Math.random() < 0.01) {
+            await croppedImage
+                .toFormat('jpeg')
+                .toFile(
+                    `closed-images/${new Date().toISOString().replace(/:/g, '_')}.jpg`,
+                );
+        }
+    }
+
     return topResult.classification;
 }
 
