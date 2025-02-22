@@ -56,12 +56,7 @@ async function classifyGate({ onnxModel }: { onnxModel: Buffer }) {
     const result = filtered.sort((a, b) => b.confidence - a.confidence);
 
     if (result.length === 0 || !result[0]) {
-        await croppedImage
-            .toFormat('jpeg')
-            .toFile(
-                `images/not-confident/${new Date().toISOString().replace(/:/g, '_')}.jpg`,
-            );
-
+        await saveCroppedImage(croppedImage, 'not-confident');
         throw new Error('no confident results');
     }
 
@@ -72,29 +67,25 @@ async function classifyGate({ onnxModel }: { onnxModel: Buffer }) {
         topResult.classification === 'open' &&
         process.env['SAVE_OPEN_IMAGES'] === 'true'
     ) {
-        // save the image to disk
-        await croppedImage
-            .toFormat('jpeg')
-            .toFile(
-                `images/open/${new Date().toISOString().replace(/:/g, '_')}.jpg`,
-            );
+        await saveCroppedImage(croppedImage, 'open');
     }
 
     if (
         topResult.classification === 'closed' &&
         process.env['SAVE_CLOSED_IMAGES'] === 'true'
     ) {
-        // random chance to save closed image
         if (Math.random() < 0.01) {
-            await croppedImage
-                .toFormat('jpeg')
-                .toFile(
-                    `images/closed/${new Date().toISOString().replace(/:/g, '_')}.jpg`,
-                );
+            await saveCroppedImage(croppedImage, 'closed');
         }
     }
 
     return topResult.classification;
+}
+
+async function saveCroppedImage(croppedImage: sharp.Sharp, folder: string) {
+    const timestamp = new Date().toISOString().replace(/:/g, '_');
+    const filePath = `images/${folder}/${timestamp}.jpg`;
+    await croppedImage.toFormat('jpeg').toFile(filePath);
 }
 
 async function updateHomeAssistant(classification: ClassifyLabels) {
