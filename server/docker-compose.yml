@@ -3,7 +3,6 @@ services:
     build: .
     volumes:
       - ./best.onnx:/app/best.onnx
-      - ./open-images:/app/open-images
-      - ./closed-images:/app/closed-images
+      - ./images:/app/images
     restart: 'always'
     env_file: .env

@@ -56,6 +56,12 @@ async function classifyGate({ onnxModel }: { onnxModel: Buffer }) {
     const result = filtered.sort((a, b) => b.confidence - a.confidence);
 
     if (result.length === 0 || !result[0]) {
+        await croppedImage
+            .toFormat('jpeg')
+            .toFile(
+                `images/not-confident/${new Date().toISOString().replace(/:/g, '_')}.jpg`,
+            );
+
         throw new Error('no confident results');
     }
 
@@ -70,7 +76,7 @@ async function classifyGate({ onnxModel }: { onnxModel: Buffer }) {
         await croppedImage
             .toFormat('jpeg')
             .toFile(
-                `open-images/${new Date().toISOString().replace(/:/g, '_')}.jpg`,
+                `images/open/${new Date().toISOString().replace(/:/g, '_')}.jpg`,
             );
     }
 
@@ -83,7 +89,7 @@ async function classifyGate({ onnxModel }: { onnxModel: Buffer }) {
             await croppedImage
                 .toFormat('jpeg')
                 .toFile(
-                    `closed-images/${new Date().toISOString().replace(/:/g, '_')}.jpg`,
+                    `images/closed/${new Date().toISOString().replace(/:/g, '_')}.jpg`,
                 );
         }
     }
