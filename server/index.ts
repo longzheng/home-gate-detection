@@ -1,13 +1,54 @@
 import * as ort from 'onnxruntime-node';
 import sharp from 'sharp';
 import AxiosDigestAuth from '@mhoc/axios-digest-auth';
-import axios from 'axios';
+import mqtt from 'mqtt';
 import 'dotenv/config';
 import { readFile } from 'fs/promises';
 
 const digestAuth = new AxiosDigestAuth({
+    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
     username: process.env['CAMERA_USERNAME']!,
+    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
     password: process.env['CAMERA_PASSWORD']!,
+});
+
+// eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+const mqttHost = process.env['MQTT_HOST']!;
+const uniqueId = 'home_gate_detection_driveway_gate';
+const mqttTopic = `homeassistant/binary_sensor/${uniqueId}/state`;
+const mqttClient = mqtt.connect(mqttHost);
+
+mqttClient.on('connect', () => {
+    logWithTimestamp('Connected to MQTT broker');
+    // Publish MQTT discovery configuration for Home Assistant auto-discovery using auto-generated topic
+    const discoveryTopic = `homeassistant/binary_sensor/${uniqueId}/config`;
+    const configPayload = JSON.stringify({
+        name: 'Driveway Gate',
+        state_topic: mqttTopic,
+        payload_on: 'on',
+        payload_off: 'off',
+        device_class: 'garage_door',
+        unique_id: uniqueId,
+    });
+    mqttClient.publish(
+        discoveryTopic,
+        configPayload,
+        { retain: true },
+        (err) => {
+            if (err) {
+                logWithTimestamp(
+                    `MQTT discovery publish error: ${err.message}`,
+                );
+            } else {
+                logWithTimestamp(
+                    `Published MQTT discovery config to ${discoveryTopic}`,
+                );
+            }
+        },
+    );
+});
+mqttClient.on('error', (err) => {
+    logWithTimestamp(`MQTT error: ${err.message}`);
 });
 
 void (async () => {
@@ -16,14 +57,11 @@ void (async () => {
     for (;;) {
         try {
             const classification = await classifyGate({ onnxModel });
-            logWithTimestamp(`classification: ${classification}`);
-
-            await updateHomeAssistant(classification);
-            logWithTimestamp(`updated home assistant`);
+            updateMqttState(classification);
         } catch (error) {
             if (error instanceof Error) {
                 logWithTimestamp(`exception: ${error.message}
-${error.stack}`);
+${error.stack ? error.stack.toString() : ''}`);
                 continue;
             }
 
@@ -88,30 +126,25 @@ async function saveCroppedImage(croppedImage: sharp.Sharp, folder: string) {
     await croppedImage.toFormat('jpeg').toFile(filePath);
 }
 
-async function updateHomeAssistant(classification: ClassifyLabels) {
-    await axios.post(
-        process.env['HOME_ASSISTANT_URL']!,
-        {
-            state: classification === 'open' ? 'on' : 'off',
-            attributes: {
-                device_class: 'garage_door',
-                friendly_name: 'Driveway gate',
-            },
-        },
-        {
-            headers: {
-                Authorization: `Bearer ${process.env['HOME_ASSISTANT_TOKEN']}`,
-                'content-type': 'application/json',
-            },
-            timeout: 10_000,
-        },
-    );
+function updateMqttState(classification: ClassifyLabels) {
+    const state = classification === 'open' ? 'on' : 'off';
+    const payload = state;
+    mqttClient.publish(mqttTopic, payload, (err) => {
+        if (err) {
+            logWithTimestamp(`MQTT publish error: ${err.message}`);
+        } else {
+            logWithTimestamp(
+                `Published state '${state}' to MQTT topic '${mqttTopic}'`,
+            );
+        }
+    });
 }
 
 async function get_camera_image() {
     const imageBuffer = await digestAuth
         .request({
             method: 'GET',
+            // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
             url: process.env['CAMERA_URL']!,
             responseType: 'arraybuffer',
             timeout: 10_000,
