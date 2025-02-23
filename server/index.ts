@@ -6,7 +6,9 @@ import 'dotenv/config';
 import { readFile } from 'fs/promises';
 
 const digestAuth = new AxiosDigestAuth({
+    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
     username: process.env['CAMERA_USERNAME']!,
+    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
     password: process.env['CAMERA_PASSWORD']!,
 });
 
@@ -23,7 +25,7 @@ void (async () => {
         } catch (error) {
             if (error instanceof Error) {
                 logWithTimestamp(`exception: ${error.message}
-${error.stack}`);
+${error.stack ? error.stack.toString() : ''}`);
                 continue;
             }
 
@@ -90,6 +92,7 @@ async function saveCroppedImage(croppedImage: sharp.Sharp, folder: string) {
 
 async function updateHomeAssistant(classification: ClassifyLabels) {
     await axios.post(
+        // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
         process.env['HOME_ASSISTANT_URL']!,
         {
             state: classification === 'open' ? 'on' : 'off',
@@ -100,6 +103,7 @@ async function updateHomeAssistant(classification: ClassifyLabels) {
         },
         {
             headers: {
+                // eslint-disable-next-line @typescript-eslint/restrict-template-expressions
                 Authorization: `Bearer ${process.env['HOME_ASSISTANT_TOKEN']}`,
                 'content-type': 'application/json',
             },
@@ -112,6 +116,7 @@ async function get_camera_image() {
     const imageBuffer = await digestAuth
         .request({
             method: 'GET',
+            // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
             url: process.env['CAMERA_URL']!,
             responseType: 'arraybuffer',
             timeout: 10_000,
