@@ -4,7 +4,7 @@
         "target": "ESNext",
         "module": "NodeNext",
         "moduleResolution": "NodeNext",
-        "noEmit": true,
+        "outDir": "dist",
         "esModuleInterop": true,
         "forceConsistentCasingInFileNames": true,
         "strict": true,
