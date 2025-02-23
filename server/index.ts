@@ -57,10 +57,7 @@ void (async () => {
     for (;;) {
         try {
             const classification = await classifyGate({ onnxModel });
-            logWithTimestamp(`classification: ${classification}`);
-
             updateMqttState(classification);
-            logWithTimestamp(`updated home assistant`);
         } catch (error) {
             if (error instanceof Error) {
                 logWithTimestamp(`exception: ${error.message}
@@ -131,7 +128,7 @@ async function saveCroppedImage(croppedImage: sharp.Sharp, folder: string) {
 
 function updateMqttState(classification: ClassifyLabels) {
     const state = classification === 'open' ? 'on' : 'off';
-    const payload = JSON.stringify({ state });
+    const payload = state;
     mqttClient.publish(mqttTopic, payload, (err) => {
         if (err) {
             logWithTimestamp(`MQTT publish error: ${err.message}`);
