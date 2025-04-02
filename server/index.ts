@@ -85,7 +85,7 @@ async function classifyGate({ onnxModel }: { onnxModel: Buffer }) {
     console.timeEnd('classify_image');
 
     // filter out low confidence
-    const confidenceThreshold = 0.8;
+    const confidenceThreshold = 0.9;
     const filtered = classify.filter(
         (classification) => classification.confidence > confidenceThreshold,
     );
