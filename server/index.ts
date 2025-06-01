@@ -53,11 +53,29 @@ mqttClient.on('error', (err) => {
 
 void (async () => {
     const onnxModel = await readFile('best.onnx');
+    // state for debounced classification updates
+    let lastClassificationReceived: ClassifyLabels | null = null;
+    let consecutiveCount = 0;
+    let lastPublishedClassification: ClassifyLabels | null = null;
 
     for (;;) {
         try {
             const classification = await classifyGate({ onnxModel });
-            updateMqttState(classification);
+            // count consecutive occurrences of the same classification
+            if (classification === lastClassificationReceived) {
+                consecutiveCount++;
+            } else {
+                lastClassificationReceived = classification;
+                consecutiveCount = 1;
+            }
+            // only update when two consecutive readings differ from last published state
+            if (
+                classification !== lastPublishedClassification &&
+                consecutiveCount >= 2
+            ) {
+                updateMqttState(classification);
+                lastPublishedClassification = classification;
+            }
         } catch (error) {
             if (error instanceof Error) {
                 logWithTimestamp(`exception: ${error.message}
