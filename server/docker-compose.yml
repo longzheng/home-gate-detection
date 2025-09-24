@@ -1,3 +1,4 @@
+name: home-gate-detection
 services:
   home-gate-detection:
     build: .
