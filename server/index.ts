@@ -12,7 +12,7 @@ const saveOpenImages = getBooleanEnv('SAVE_OPEN_IMAGES');
 const saveClosedImages = getBooleanEnv('SAVE_CLOSED_IMAGES');
 const uniqueId = 'home_gate_detection_driveway_gate';
 const mqttTopic = `homeassistant/binary_sensor/${uniqueId}/state`;
-const mqttClient = mqttHost ? mqtt.connect(mqttHost) : null;
+const mqttClient = mqttHost ? mqtt.connect(`mqtt://${mqttHost}`) : null;
 
 if (mqttClient) {
     mqttClient.on('connect', () => {
