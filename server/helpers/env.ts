@@ -20,3 +20,25 @@ export function getRequiredNumberEnv(key: string): number {
 
     return parsed;
 }
+
+export function getBooleanEnv(key: string, defaultValue = false): boolean {
+    const value = process.env[key];
+
+    if (value === undefined) {
+        return defaultValue;
+    }
+
+    const normalized = value.trim().toLowerCase();
+
+    if (normalized === 'true') {
+        return true;
+    }
+
+    if (normalized === 'false') {
+        return false;
+    }
+
+    throw new Error(
+        `Environment variable ${key} must be 'true' or 'false', received '${value}'`,
+    );
+}

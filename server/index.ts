@@ -3,11 +3,13 @@ import 'dotenv/config';
 import type { ClassifyLabels } from './helpers/classifier.js';
 import { classifyImage } from './helpers/classifier.js';
 import { getCameraImage } from './helpers/camera.js';
-import { getRequiredEnv } from './helpers/env.js';
+import { getBooleanEnv, getRequiredEnv } from './helpers/env.js';
 import { saveCroppedImage } from './helpers/image-storage.js';
 import { logWithTimestamp } from './helpers/logger.js';
 
 const mqttHost = getRequiredEnv('MQTT_HOST');
+const saveOpenImages = getBooleanEnv('SAVE_OPEN_IMAGES');
+const saveClosedImages = getBooleanEnv('SAVE_CLOSED_IMAGES');
 const uniqueId = 'home_gate_detection_driveway_gate';
 const mqttTopic = `homeassistant/binary_sensor/${uniqueId}/state`;
 const mqttClient = mqtt.connect(mqttHost);
@@ -110,17 +112,11 @@ async function classifyGate() {
     const topResult = result[0];
     logWithTimestamp(`top result: ${JSON.stringify(topResult)}`);
 
-    if (
-        topResult.classification === 'open' &&
-        process.env['SAVE_OPEN_IMAGES'] === 'true'
-    ) {
+    if (topResult.classification === 'open' && saveOpenImages) {
         await saveCroppedImage(croppedImage, 'open');
     }
 
-    if (
-        topResult.classification === 'closed' &&
-        process.env['SAVE_CLOSED_IMAGES'] === 'true'
-    ) {
+    if (topResult.classification === 'closed' && saveClosedImages) {
         if (Math.random() < 0.01) {
             await saveCroppedImage(croppedImage, 'closed');
         }
