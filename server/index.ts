@@ -3,50 +3,52 @@ import 'dotenv/config';
 import type { ClassifyLabels } from './helpers/classifier.js';
 import { classifyImage } from './helpers/classifier.js';
 import { getCameraImage } from './helpers/camera.js';
-import { getBooleanEnv, getRequiredEnv } from './helpers/env.js';
+import { getBooleanEnv } from './helpers/env.js';
 import { saveCroppedImage } from './helpers/image-storage.js';
 import { logWithTimestamp } from './helpers/logger.js';
 
-const mqttHost = getRequiredEnv('MQTT_HOST');
+const mqttHost = process.env['MQTT_HOST'];
 const saveOpenImages = getBooleanEnv('SAVE_OPEN_IMAGES');
 const saveClosedImages = getBooleanEnv('SAVE_CLOSED_IMAGES');
 const uniqueId = 'home_gate_detection_driveway_gate';
 const mqttTopic = `homeassistant/binary_sensor/${uniqueId}/state`;
-const mqttClient = mqtt.connect(mqttHost);
+const mqttClient = mqttHost ? mqtt.connect(mqttHost) : null;
 
-mqttClient.on('connect', () => {
-    logWithTimestamp('Connected to MQTT broker');
-    // Publish MQTT discovery configuration for Home Assistant auto-discovery using auto-generated topic
-    const discoveryTopic = `homeassistant/binary_sensor/${uniqueId}/config`;
-    const configPayload = JSON.stringify({
-        name: 'Driveway Gate',
-        state_topic: mqttTopic,
-        payload_on: 'on',
-        payload_off: 'off',
-        device_class: 'garage_door',
-        unique_id: uniqueId,
+if (mqttClient) {
+    mqttClient.on('connect', () => {
+        logWithTimestamp('Connected to MQTT broker');
+        // Publish MQTT discovery configuration for Home Assistant auto-discovery using auto-generated topic
+        const discoveryTopic = `homeassistant/binary_sensor/${uniqueId}/config`;
+        const configPayload = JSON.stringify({
+            name: 'Driveway Gate',
+            state_topic: mqttTopic,
+            payload_on: 'on',
+            payload_off: 'off',
+            device_class: 'garage_door',
+            unique_id: uniqueId,
+        });
+        mqttClient.publish(
+            discoveryTopic,
+            configPayload,
+            { retain: true },
+            (err) => {
+                if (err) {
+                    logWithTimestamp(
+                        `MQTT discovery publish error: ${err.message}`,
+                    );
+                } else {
+                    logWithTimestamp(
+                        `Published MQTT discovery config to ${discoveryTopic}`,
+                    );
+                }
+            },
+        );
     });
-    mqttClient.publish(
-        discoveryTopic,
-        configPayload,
-        { retain: true },
-        (err) => {
-            if (err) {
-                logWithTimestamp(
-                    `MQTT discovery publish error: ${err.message}`,
-                );
-            } else {
-                logWithTimestamp(
-                    `Published MQTT discovery config to ${discoveryTopic}`,
-                );
-            }
-        },
-    );
-});
 
-mqttClient.on('error', (err) => {
-    logWithTimestamp(`MQTT error: ${err.message}`);
-});
+    mqttClient.on('error', (err) => {
+        logWithTimestamp(`MQTT error: ${err.message}`);
+    });
+}
 
 // state for debounced classification updates
 let lastClassificationReceived: ClassifyLabels | null = null;
@@ -126,6 +128,10 @@ async function classifyGate() {
 }
 
 function updateMqttState(classification: ClassifyLabels) {
+    if (!mqttClient) {
+        return;
+    }
+
     const state = classification === 'open' ? 'on' : 'off';
     const payload = state;
     mqttClient.publish(mqttTopic, payload, (err) => {
