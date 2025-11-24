@@ -71,6 +71,8 @@ function prepareInput(pixels: Buffer) {
     return input;
 }
 
+let sessionPromise: Promise<ort.InferenceSession> | null = null;
+
 async function runModel({
     input,
     onnxModel,
@@ -78,8 +80,10 @@ async function runModel({
     input: number[];
     onnxModel: Buffer;
 }) {
-    // TODO create session once and reuse
-    const session = await ort.InferenceSession.create(onnxModel);
+    if (!sessionPromise) {
+        sessionPromise = ort.InferenceSession.create(onnxModel);
+    }
+    const session = await sessionPromise;
     const tensor = new ort.Tensor(
         Float32Array.from(input),
         [

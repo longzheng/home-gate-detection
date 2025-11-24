@@ -2,7 +2,7 @@ import AxiosDigestAuth from '@mhoc/axios-digest-auth';
 import sharp from 'sharp';
 import { getRequiredEnv, getRequiredNumberEnv } from './env.js';
 
-const digestAuth = new AxiosDigestAuth({
+const digestAuth = new AxiosDigestAuth.default({
     username: getRequiredEnv('CAMERA_USERNAME'),
     password: getRequiredEnv('CAMERA_PASSWORD'),
 });
