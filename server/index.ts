@@ -1,6 +1,5 @@
 import mqtt from 'mqtt';
 import 'dotenv/config';
-import { readFile } from 'fs/promises';
 import type { ClassifyLabels } from './helpers/classifier.js';
 import { classifyImage } from './helpers/classifier.js';
 import { getCameraImage } from './helpers/camera.js';
@@ -42,48 +41,46 @@ mqttClient.on('connect', () => {
         },
     );
 });
+
 mqttClient.on('error', (err) => {
     logWithTimestamp(`MQTT error: ${err.message}`);
 });
 
-void (async () => {
-    const onnxModel = await readFile('best.onnx');
-    // state for debounced classification updates
-    let lastClassificationReceived: ClassifyLabels | null = null;
-    let consecutiveCount = 0;
-    let lastPublishedClassification: ClassifyLabels | null = null;
+// state for debounced classification updates
+let lastClassificationReceived: ClassifyLabels | null = null;
+let consecutiveCount = 0;
+let lastPublishedClassification: ClassifyLabels | null = null;
 
-    for (;;) {
-        try {
-            const classification = await classifyGate({ onnxModel });
-            // count consecutive occurrences of the same classification
-            if (classification === lastClassificationReceived) {
-                consecutiveCount++;
-            } else {
-                lastClassificationReceived = classification;
-                consecutiveCount = 1;
-            }
-            // only update when two consecutive readings differ from last published state
-            if (
-                classification !== lastPublishedClassification &&
-                consecutiveCount >= 2
-            ) {
-                updateMqttState(classification);
-                lastPublishedClassification = classification;
-            }
-        } catch (error) {
-            if (error instanceof Error) {
-                logWithTimestamp(`exception: ${error.message}
-${error.stack ? error.stack.toString() : ''}`);
-                continue;
-            }
-
-            throw error;
+for (;;) {
+    try {
+        const classification = await classifyGate();
+        // count consecutive occurrences of the same classification
+        if (classification === lastClassificationReceived) {
+            consecutiveCount++;
+        } else {
+            lastClassificationReceived = classification;
+            consecutiveCount = 1;
         }
-    }
-})();
+        // only update when two consecutive readings differ from last published state
+        if (
+            classification !== lastPublishedClassification &&
+            consecutiveCount >= 2
+        ) {
+            updateMqttState(classification);
+            lastPublishedClassification = classification;
+        }
+    } catch (error) {
+        if (error instanceof Error) {
+            logWithTimestamp(`exception: ${error.message}
+${error.stack ? error.stack.toString() : ''}`);
+            continue;
+        }
 
-async function classifyGate({ onnxModel }: { onnxModel: Buffer }) {
+        throw error;
+    }
+}
+
+async function classifyGate() {
     // get image
     console.time('get_camera_image');
     const croppedImage = await getCameraImage();
@@ -93,7 +90,6 @@ async function classifyGate({ onnxModel }: { onnxModel: Buffer }) {
     console.time('classify_image');
     const classify = await classifyImage({
         image: croppedImage,
-        onnxModel,
     });
     console.timeEnd('classify_image');
 

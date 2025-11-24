@@ -1,6 +1,7 @@
 import * as ort from 'onnxruntime-node';
 import type sharp from 'sharp';
 import { logWithTimestamp } from './logger.js';
+import { readFile } from 'fs/promises';
 
 export type ClassifyLabels = 'closed' | 'open';
 
@@ -16,10 +17,8 @@ const labels: Record<string, ClassifyLabels> = {
 
 export async function classifyImage({
     image,
-    onnxModel,
 }: {
     image: sharp.Sharp;
-    onnxModel: Buffer;
 }): Promise<ClassificationResult[]> {
     const imageBuffer = await image
         .clone()
@@ -29,7 +28,7 @@ export async function classifyImage({
         .toBuffer();
 
     const input = prepareInput(imageBuffer);
-    const output = await runModel({ input, onnxModel });
+    const output = await runModel({ input });
 
     const result = Object.entries(output).map(([key, value]) => {
         const classification = labels[key];
@@ -71,19 +70,10 @@ function prepareInput(pixels: Buffer) {
     return input;
 }
 
-let sessionPromise: Promise<ort.InferenceSession> | null = null;
+const onnxModel = await readFile('best.onnx');
+const session = await ort.InferenceSession.create(onnxModel);
 
-async function runModel({
-    input,
-    onnxModel,
-}: {
-    input: number[];
-    onnxModel: Buffer;
-}) {
-    if (!sessionPromise) {
-        sessionPromise = ort.InferenceSession.create(onnxModel);
-    }
-    const session = await sessionPromise;
+async function runModel({ input }: { input: number[] }) {
     const tensor = new ort.Tensor(
         Float32Array.from(input),
         [
