@@ -5,7 +5,7 @@ import eslintConfigPrettier from 'eslint-config-prettier';
 
 export default tseslint.config(
     {
-        ignores: ['**/open-images/', '**/best.onnx'],
+        ignores: ['images/', 'best.onnx', 'dist/'],
     },
     eslint.configs.recommended,
     ...tseslint.configs.strictTypeChecked,
