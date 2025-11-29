@@ -1,7 +1,6 @@
-import * as ort from 'onnxruntime-node';
 import type sharp from 'sharp';
+import { addon as ov } from 'openvino-node';
 import { logWithTimestamp } from './logger.js';
-import { readFile } from 'fs/promises';
 
 export type ClassifyLabels = 'closed' | 'open';
 
@@ -28,7 +27,7 @@ export async function classifyImage({
         .toBuffer();
 
     const input = prepareInput(imageBuffer);
-    const output = await runModel({ input });
+    const output = runModel({ input });
 
     const result = Object.entries(output).map(([key, value]) => {
         const classification = labels[key];
@@ -37,7 +36,9 @@ export async function classifyImage({
             throw new Error('unknown classification');
         }
 
-        return { classification, confidence: value as number };
+        const confidence = Number(value);
+
+        return { classification, confidence };
     });
 
     logWithTimestamp(`model result: ${JSON.stringify(result)}`);
@@ -70,12 +71,22 @@ function prepareInput(pixels: Buffer) {
     return input;
 }
 
-const onnxModel = await readFile('best.onnx');
-const session = await ort.InferenceSession.create(onnxModel);
+const core = new ov.Core();
+const modelPath = 'best.xml';
+const model = await core.readModel(modelPath);
+const compiledModel = await core.compileModel(model, 'CPU');
+const inferRequest = compiledModel.createInferRequest();
+const outputLayer = compiledModel.outputs[0];
 
-async function runModel({ input }: { input: number[] }) {
-    const tensor = new ort.Tensor(
-        Float32Array.from(input),
+if (!outputLayer) {
+    throw new Error('Model does not expose an output layer');
+}
+
+const validatedOutputLayer = outputLayer;
+
+function runModel({ input }: { input: number[] }) {
+    const tensor = new ov.Tensor(
+        ov.element.f32,
         [
             1,
             // 3 channels?
@@ -85,14 +96,13 @@ async function runModel({ input }: { input: number[] }) {
             // height
             224,
         ],
+        Float32Array.from(input),
     );
-    const outputs = await session.run({ images: tensor });
 
-    const output0 = outputs['output0'];
+    inferRequest.setInputTensor(tensor);
+    inferRequest.infer();
 
-    if (!output0) {
-        throw new Error('no output0');
-    }
+    const outputTensor = inferRequest.getTensor(validatedOutputLayer);
 
-    return output0.data;
+    return outputTensor.data;
 }

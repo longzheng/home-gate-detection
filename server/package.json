@@ -18,7 +18,7 @@
     "axios": "^1.7.9",
     "dotenv": "^16.4.7",
     "mqtt": "^5.10.3",
-    "onnxruntime-node": "^1.20.1",
+    "openvino-node": "^2025.3.0",
     "sharp": "^0.33.5"
   },
   "devDependencies": {
