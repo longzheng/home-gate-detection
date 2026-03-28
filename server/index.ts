@@ -98,7 +98,7 @@ async function classifyGate() {
     console.timeEnd('classify_image');
 
     // filter out low confidence
-    const confidenceThreshold = 0.9;
+    const confidenceThreshold = 0.95;
     const filtered = classify.filter(
         (classification) => classification.confidence > confidenceThreshold,
     );
