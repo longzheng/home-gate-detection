@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 
 # Build
-FROM node:22 AS build
+FROM node:24-slim AS build
 
 WORKDIR /app
 
@@ -20,7 +20,7 @@ COPY . .
 RUN npm run build
 
 # Production
-FROM node:22 AS production
+FROM node:24-slim AS production
 
 ENV NODE_ENV=production
 
