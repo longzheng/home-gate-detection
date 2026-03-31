@@ -49,4 +49,4 @@ RUN --mount=type=bind,source=package.json,target=package.json \
 USER node
 
 # Run the application.
-CMD ["pnpm", "start"]
+CMD ["node", "dist/index.js"]
