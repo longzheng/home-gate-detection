@@ -76,7 +76,7 @@ for (;;) {
     } catch (error) {
         if (error instanceof Error) {
             logWithTimestamp(`exception: ${error.message}
-${error.stack ? error.stack.toString() : ''}`);
+${error.stack ?? ''}`);
             continue;
         }
 

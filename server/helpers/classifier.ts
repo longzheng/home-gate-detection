@@ -1,7 +1,6 @@
 import * as ort from 'onnxruntime-node';
 import type sharp from 'sharp';
 import { logWithTimestamp } from './logger.js';
-import { readFile } from 'fs/promises';
 
 export type ClassifyLabels = 'closed' | 'open';
 
@@ -10,82 +9,122 @@ export type ClassificationResult = {
     confidence: number;
 };
 
-const labels: Record<string, ClassifyLabels> = {
-    '0': 'closed',
-    '1': 'open',
-};
+const modelWidth = 224;
+const modelHeight = 224;
+const channelCount = 3;
+const pixelCount = modelWidth * modelHeight;
+const inputElementCount = channelCount * pixelCount;
+const labels = ['closed', 'open'] as const satisfies readonly ClassifyLabels[];
+const normalizedByteValues = Float32Array.from(
+    { length: 256 },
+    (_, value) => value / 255,
+);
 
 export async function classifyImage({
     image,
 }: {
     image: sharp.Sharp;
 }): Promise<ClassificationResult[]> {
-    const imageBuffer = await image
+    const { data: imageBuffer, info } = await image
         .clone()
         // classify model is hard-coded to 224x224
-        .resize({ width: 224, height: 224, fit: 'fill' })
+        .resize({ width: modelWidth, height: modelHeight, fit: 'fill' })
+        // Always provide the RGB input layout expected by the model, even if
+        // the camera is changed to return a grayscale or alpha-channel image.
+        .toColourspace('srgb')
+        .removeAlpha()
         .raw()
-        .toBuffer();
+        .toBuffer({ resolveWithObject: true });
+
+    if (
+        info.width !== modelWidth ||
+        info.height !== modelHeight ||
+        info.channels !== channelCount
+    ) {
+        throw new Error(
+            `invalid model input shape: ${String(info.width)}x${String(info.height)}x${String(info.channels)}`,
+        );
+    }
 
     const input = prepareInput(imageBuffer);
     const output = await runModel({ input });
 
-    const result = Object.entries(output).map(([key, value]) => {
-        const classification = labels[key];
+    if (output.length !== labels.length) {
+        throw new Error(
+            `unexpected model output count: received ${String(output.length)}, expected ${String(labels.length)}`,
+        );
+    }
 
-        if (!classification) {
-            throw new Error('unknown classification');
+    const result: ClassificationResult[] = [];
+    for (const [index, classification] of labels.entries()) {
+        const confidence = output[index];
+        if (confidence === undefined) {
+            throw new Error(`missing model output at index ${String(index)}`);
         }
 
-        return { classification, confidence: value as number };
-    });
+        result.push({ classification, confidence });
+    }
 
     logWithTimestamp(`model result: ${JSON.stringify(result)}`);
 
     return result;
 }
 
-function prepareInput(pixels: Buffer) {
-    const red: number[] = [],
-        green: number[] = [],
-        blue: number[] = [];
-    for (let index = 0; index < pixels.length; index += 3) {
-        const redPixel = pixels[index];
-        const greenPixel = pixels[index + 1];
-        const bluePixel = pixels[index + 2];
+function prepareInput(pixels: Uint8Array): Float32Array {
+    if (pixels.length !== inputElementCount) {
+        throw new Error(
+            `invalid pixel count: received ${String(pixels.length)}, expected ${String(inputElementCount)}`,
+        );
+    }
 
-        if (
-            redPixel === undefined ||
-            greenPixel === undefined ||
-            bluePixel === undefined
-        ) {
-            throw new Error('invalid pixel');
+    // Sharp returns interleaved RGB bytes (HWC), while the ONNX model expects
+    // normalized planar floats (NCHW). Write directly into the final typed
+    // array to avoid three dynamic number arrays, their concatenation, and a
+    // second copy into Float32Array on every frame.
+    const input = new Float32Array(inputElementCount);
+    for (
+        let sourceIndex = 0, pixelIndex = 0;
+        pixelIndex < pixelCount;
+        sourceIndex += channelCount, pixelIndex++
+    ) {
+        const red = pixels[sourceIndex];
+        const green = pixels[sourceIndex + 1];
+        const blue = pixels[sourceIndex + 2];
+
+        if (red === undefined || green === undefined || blue === undefined) {
+            throw new Error(
+                `missing pixel data at index ${String(sourceIndex)}`,
+            );
         }
 
-        red.push(redPixel / 255.0);
-        green.push(greenPixel / 255.0);
-        blue.push(bluePixel / 255.0);
+        input[pixelIndex] = normalizeByte(red);
+        input[pixelCount + pixelIndex] = normalizeByte(green);
+        input[2 * pixelCount + pixelIndex] = normalizeByte(blue);
     }
-    const input = [...red, ...green, ...blue];
+
     return input;
 }
 
-const onnxModel = await readFile('best.onnx');
-const session = await ort.InferenceSession.create(onnxModel);
+function normalizeByte(value: number): number {
+    const normalized = normalizedByteValues[value];
+    if (normalized === undefined) {
+        throw new Error(`invalid byte value: ${String(value)}`);
+    }
 
-async function runModel({ input }: { input: number[] }) {
-    const tensor = new ort.Tensor(
-        Float32Array.from(input),
-        [
-            1,
-            // 3 channels?
-            3,
-            // width
-            224,
-            // height
-            224,
-        ],
-    );
+    return normalized;
+}
+
+// Loading from a path lets the native runtime own model loading. Reading the
+// file into a module-level Buffer retained an extra ~49 MB for this model.
+const session = await ort.InferenceSession.create('best.onnx');
+
+async function runModel({ input }: { input: Float32Array }) {
+    const tensor = new ort.Tensor(input, [
+        1,
+        channelCount,
+        modelHeight,
+        modelWidth,
+    ]);
     const outputs = await session.run({ images: tensor });
 
     const output0 = outputs['output0'];
@@ -94,5 +133,9 @@ async function runModel({ input }: { input: number[] }) {
         throw new Error('no output0');
     }
 
-    return output0.data;
+    if (output0.type !== 'float32') {
+        throw new Error(`unexpected output type: ${output0.type}`);
+    }
+
+    return output0.data as Float32Array;
 }
