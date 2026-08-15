@@ -33,12 +33,5 @@
     "tsx": "^4.20.6",
     "typescript": "^5.7.3",
     "typescript-eslint": "^8.24.1"
-  },
-  "pnpm": {
-    "onlyBuiltDependencies": [
-      "esbuild",
-      "onnxruntime-node",
-      "sharp"
-    ]
   }
 }
