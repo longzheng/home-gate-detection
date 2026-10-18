@@ -1,86 +1,174 @@
 # home-gate-detection
 
-Using a custom YOLOv8-based image classification model to detect if my driveway gate is open or closed and set state in Home Assistant.
+Detect whether a driveway gate is open or closed from a CCTV snapshot, then publish its state to Home Assistant over MQTT.
 
----
+The project uses an Ultralytics image classification model exported to ONNX and a TypeScript server running on Node.js. The current training notebook starts from `yolo26n-cls.pt`.
 
 ## Background
 
-I like home automation and I've already automated the garage door, so I wanted to automate the driveway gate too. It is a swing gate controlled by a FAAC EO24S controller which I've already set up a WiFi relay to open and close, but I couldn't see a way to get the open or closed state of the gate.
+My swing gate has a FAAC EO24S controller and a Wi-Fi relay to trigger it, but the relay cannot report whether the gate is open or closed. Rather than adding a reed switch and wiring around the swing arms, I use an existing CCTV camera with an unobstructed view of the gate.
 
-I could have used a magnetic reed switch like most smart garage controllers do, but I didn't like the idea of a wire moving around with the swing arms.
-
-I already had a CCTV camera with unobstructed view of the gate, which gave me an idea to give neural networks a go which I haven't done before.
-
-## The model
-
-I came across [YOLOv8](https://docs.ultralytics.com/), an impressive free and open-source image object detection, segmentation and classiciation model.
-
-For what I need, [image classification](https://docs.ultralytics.com/tasks/classify/) was an ideal fit because I don't need to identify where the gate was in the image or its shape outline, just if it was open or closed, effective a binary state.
-
-## Training
-
-I used [Roboflow](https://roboflow.com/) to quickly label a dataset from my CCTV camera footage.
-
-Since I was planning to be only use a crop of the gate for the actual model inference, I also pre-cropped all my training images before uploading them to Roboflow.
-
-I tried to find examples of open and closed gates, in different weather and lighting conditions, as well as with vehicles and people across it. I ended up with 87 images roughly equally split between open and closed.
+The original experiment used YOLOv8 and 87 pre-cropped images labelled with Roboflow, covering different lighting, weather, vehicles, and people. The current training workflow is described below.
 
 ![Sample of training images](https://github.com/longzheng/home-gate-detection/assets/484912/2435e1a2-046c-497f-937d-59c6efa9f60c)
 
-I trained 300 epochs using the `yolov8s-cls.pt` pretrained model using my RTX 4070 Ti GPU which only took a few minutes.
+## How it works
 
-![Training result](https://github.com/longzheng/home-gate-detection/assets/484912/db98bab3-d17e-4966-90cd-8f26e1101a44)
+1. Fetch a camera snapshot using HTTP Digest authentication, with a 10-second request timeout.
+2. Crop the configured gate region and resize the entire crop to 224 × 224 RGB pixels.
+3. Run `best.onnx` with ONNX Runtime using float32 NCHW input scaled to `[0, 1]`.
+4. Accept the highest-scoring class only when its confidence is **greater than 0.95**.
+5. Confirm the gate state after two consecutive matching confident readings and publish it over MQTT.
 
+The loop runs continuously, with a one-second delay after errors. There is no fixed polling interval. The server reports state only; gate control remains with the existing relay and Home Assistant.
 
-## Inference
+## Run the server
 
-I planned to run this on my Windows home server which only has an integrated GPU, so it was practically going to run on CPU. I found the ONNX format which could be ran in Node.js using [Microsoft's ONNX Runtime](https://onnxruntime.ai/) so I exported the model to ONNX which YOLO CLI had built-in support for.
+Use Node.js 24 (matching the Docker image) and pnpm, or use Docker Compose.
 
-I then wrote a simple Node.js script to basically loop through downloading the latest snapshot from my CCTV camera, crop it, run inference with the custom model, filter and find the most confident prediction.
+Before starting:
 
-Because I used the ["small" pretrained model](https://docs.ultralytics.com/tasks/classify/), inference only took approximately 80ms on a Intel i5-9600K CPU. In fact downloading the image was significantly slower at approximately 900ms. So the whole update loop takes around 1 second which is good enough for my needs.
+- Provide a camera snapshot URL and Digest authentication credentials.
+- Train or supply a compatible model and place it at `server/best.onnx`. Model weights and training images are not included in Git.
+- Set the crop coordinates to match your camera and training images.
+- For Home Assistant integration, provide an MQTT broker reachable by both the server and Home Assistant.
+
+From the repository root, run these PowerShell commands:
+
+```powershell
+cd server
+Copy-Item .env.example .env
+New-Item -ItemType Directory -Force images/open, images/closed, images/not-confident
+pnpm install --frozen-lockfile
+```
+
+Edit `.env` using the settings below, then start the server:
+
+```powershell
+pnpm build
+pnpm start
+```
+
+For development, use `pnpm dev` to run the TypeScript source directly. Run commands from `server/`: the model, `.env`, and image paths are relative to the working directory.
+
+### Configuration
+
+| Variable | Required / default | Purpose |
+| --- | --- | --- |
+| `CAMERA_URL` | Required | URL returning a camera snapshot. |
+| `CAMERA_USERNAME` | Required | Camera Digest authentication username. |
+| `CAMERA_PASSWORD` | Required | Camera Digest authentication password. |
+| `CAMERA_CROP_LEFT` | Required | Left edge of the gate crop, in source-image pixels. |
+| `CAMERA_CROP_TOP` | Required | Top edge of the gate crop, in source-image pixels. |
+| `CAMERA_CROP_WIDTH` | Required | Width of the gate crop, in pixels. |
+| `CAMERA_CROP_HEIGHT` | Required | Height of the gate crop, in pixels. |
+| `MQTT_HOST` | Optional | Broker host, optionally with a port, e.g. `192.168.1.10:1883`. The server prepends `mqtt://`; leave blank to run without MQTT. |
+| `SAVE_OPEN_IMAGES` | `false` | Save every confident open crop. |
+| `SAVE_CLOSED_IMAGES` | `false` | Save a random 1% sample of confident closed crops. |
+| `DEBOUNCE_MAX_GAP_MS` | `5000` | Maximum gap between capture start times for matching readings to count toward confirmation. |
+| `STALE_STATE_TIMEOUT_MS` | `30000` | Expire the confirmed state when its supporting capture is this old. |
+
+The crop values in `.env.example` are specific to my camera. Use a rectangle within your snapshot bounds. Both timeout settings must be positive finite numbers. Image-saving flags accept `true` or `false` (case-insensitive).
+
+Crops with no confident result are always saved to `images/not-confident/`, regardless of the flags. Other saved crops go to `images/open/` and `images/closed/`. The server does not create these directories or prune old images, so create them before starting and manage disk usage as needed.
+
+### Docker Compose
+
+After preparing `.env`, `best.onnx`, and the image directories in `server/`, run from that directory:
+
+```sh
+docker compose up -d --build
+docker compose logs -f
+```
+
+Compose builds the Node.js 24 image, loads `.env`, mounts `best.onnx` and `images/`, and restarts the service automatically. The container runs as the `node` user, which needs write access to the mounted image directories. Use a broker address reachable from the container; `localhost` refers to the container itself.
 
 ## Home Assistant
 
-I set up my Node script to push the state into my Home Assistant as a `binary_sensor` by simplying `POST`ing the state to Home Assistant.
+Enable Home Assistant's MQTT integration against the same broker. The server publishes retained discovery configuration for a binary sensor named **Driveway Gate**, with the unique ID `home_gate_detection_driveway_gate` and device class `garage_door`. No Home Assistant HTTP URL or access token is used.
 
-```js
-        {
-            state: classification === "open" ? "on" : "off",
-            attributes: {
-                device_class: "garage_door",
-                friendly_name: "Driveway gate",
-            },
-        },
-```
+All topics share the prefix `homeassistant/binary_sensor/home_gate_detection_driveway_gate`:
 
-I wanted to tie together this open/closed state with my existing Wifi relay to more accurately represent the gate as a cover entity in Home Assistant so I used a template to merge the two together
+| Topic suffix | Payload |
+| --- | --- |
+| `/config` | Home Assistant discovery JSON. |
+| `/state` | `on` for open, `off` for closed. |
+| `/availability` | `online` or `offline`. |
+
+State and availability publications are retained, use QoS 1, and are retried after publication failures. Reconnecting republishes discovery and the current state/availability. A retained MQTT last will marks the sensor offline when the broker detects an unexpected disconnect.
+
+### Confirmation and availability
+
+The sensor starts unavailable. It needs two consecutive confident matching readings, no more than `DEBOUNCE_MAX_GAP_MS` apart, to become available or change state. Camera/inference errors and uncertain frames reset pending confirmation.
+
+The last confirmed state remains available until `STALE_STATE_TIMEOUT_MS` has elapsed since its supporting capture. Alternating predictions do not refresh it, and results already that old are discarded. A watchdog checks expiry every 250 ms, including while capture or inference is awaiting I/O. After expiry, two matching readings are required to recover.
+
+### Combine the sensor with a gate relay
+
+A [Home Assistant template cover](https://www.home-assistant.io/integrations/template/#cover) can combine the detected state with an existing relay. Replace the entity IDs below with your actual MQTT sensor and relay entities. This example assumes the relay is already configured to pulse the gate controller for open, close, and stop.
 
 ```yaml
-cover:
-  - platform: template
-    covers:
-      driveway_gate:
+template:
+  - cover:
+      - name: "Driveway gate"
         device_class: gate
-        friendly_name: "Driveway gate"
-        value_template: "{{ is_state('binary_sensor.driveway_gate', 'on') }}"
+        state: "{{ is_state('binary_sensor.driveway_gate', 'on') }}"
+        availability: "{{ states('binary_sensor.driveway_gate') in ['on', 'off'] }}"
         open_cover:
-          service: switch.turn_on
-          target:
-            entity_id: switch.sonoff_gate
+          - action: switch.turn_on
+            target:
+              entity_id: switch.sonoff_gate
         close_cover:
-          service: switch.turn_on
-          target:
-            entity_id: switch.sonoff_gate
+          - action: switch.turn_on
+            target:
+              entity_id: switch.sonoff_gate
         stop_cover:
-          service: switch.turn_on
-          target:
-            entity_id: switch.sonoff_gate
+          - action: switch.turn_on
+            target:
+              entity_id: switch.sonoff_gate
 ```
+
+Keep the availability template so an unavailable sensor is not interpreted as a closed gate. Existing installations must also apply this in Home Assistant (`availability_template` for an existing legacy cover configuration).
 
 <img width="619" alt="Gate in Home Assistant" src="https://github.com/longzheng/home-gate-detection/assets/484912/69941812-86b0-48dc-8092-12236c1b33cf">
 
-Finally, since I do most of my actual home management in Apple Home, so I re-exported the merged gate entity to HomeKit.
+I also expose the combined cover to Apple Home through Home Assistant's HomeKit integration.
 
 ![Driveway gate in HomeKit](https://github.com/longzheng/home-gate-detection/assets/484912/af29cedf-1e67-4e5a-be1e-2409672e101c)
+
+## Train and export a model
+
+Open [training/notebook.ipynb](training/notebook.ipynb) in Jupyter with `training/` as the working directory.
+
+1. Put labelled, pre-cropped gate images in `training/dataset/closed/` and `training/dataset/open/`. Use the same gate region as the server, with examples across lighting, weather, and obstructions. Include JPG images in both classes for the notebook's preview cell.
+2. Install the notebook dependencies. Its installation cells install PyTorch/torchvision from the CUDA 12.8 index and Ultralytics; adapt the PyTorch installation to your hardware if needed.
+3. Run the dataset split cell. It deletes any existing `dataset_split/` directory before recreating the split.
+4. Inspect the preprocessing preview, then train from `yolo26n-cls.pt` using `GateClassificationTrainer`.
+5. Validate the best checkpoint using `GateClassificationValidator`.
+6. Export the best checkpoint to ONNX using the final cell, then copy the exported `best.onnx` to `server/best.onnx` and restart the server.
+
+[training/gate_transforms.py](training/gate_transforms.py) preserves the entire gate crop and stretches it to 224 × 224. Training adds mild color jitter, with no random cropping, flipping, or erasing. Validation uses the same resize and normalization as inference: RGB, CHW, and division by 255, without ImageNet normalization. PIL and Sharp resizing can produce slightly different pixels.
+
+Use the custom validator for standalone validation too. Generic Ultralytics prediction may apply different crops; use the server for deployed inference or explicitly apply the custom transforms. The notebook does not set a fixed epoch count and uses the installed Ultralytics defaults for unspecified training options.
+
+### ONNX model contract
+
+The server expects:
+
+- File: `best.onnx` in the server's working directory.
+- Input: `images`, float32, shape `[1, 3, 224, 224]`.
+- Output: `output0`, float32, with exactly two class scores in the order **closed, open**.
+- Export: image size 224, batch size 1, and `dynamic=False`, as configured in the notebook.
+
+If you change the classes, their order, or the input size, update the classifier to match before deploying the model.
+
+## Development checks
+
+Run from `server/`:
+
+```sh
+pnpm test
+pnpm lint
+```
+
+`pnpm test` compiles the TypeScript and runs the gate-state tests. `pnpm lint` runs TypeScript checking and ESLint.
