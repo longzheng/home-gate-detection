@@ -5,6 +5,7 @@
   "type": "module",
   "main": "./dist/index.js",
   "scripts": {
+    "test": "tsc && node --test dist/helpers/*.test.js",
     "build": "tsc",
     "start": "node dist/index.js",
     "dev": "tsx index.ts",

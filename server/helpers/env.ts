@@ -1,3 +1,13 @@
+export function getPositiveNumberEnv(
+    key: string,
+    defaultValue: number,
+): number {
+    if (process.env[key] === undefined) return defaultValue;
+    const value = getRequiredNumberEnv(key);
+    if (value <= 0) throw new Error(`${key} must be greater than zero`);
+    return value;
+}
+
 export function getRequiredEnv(key: string): string {
     const value = process.env[key];
 
