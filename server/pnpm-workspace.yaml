@@ -1,4 +1,0 @@
-allowBuilds:
-  esbuild: true
-  onnxruntime-node: true
-  sharp: true

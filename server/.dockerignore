@@ -1,3 +1,5 @@
-**/node_modules/
-.env
-best.onnx
+*
+!Cargo.toml
+!Cargo.lock
+!src/
+!src/**

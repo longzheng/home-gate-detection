@@ -2,7 +2,7 @@
 
 Detect whether a driveway gate is open or closed from a CCTV snapshot, then publish its state to Home Assistant over MQTT.
 
-The project uses an Ultralytics image classification model exported to ONNX and a TypeScript server running on Node.js. The current training notebook starts from `yolo26n-cls.pt`.
+The Rust server runs an Ultralytics image classification model exported to ONNX. The current training notebook starts from `yolo26n-cls.pt`.
 
 ## Background
 
@@ -14,7 +14,7 @@ The original experiment used YOLOv8 and 87 pre-cropped images labelled with Robo
 
 ## How it works
 
-1. Fetch a camera snapshot using HTTP Digest authentication, with a 10-second request timeout.
+1. Fetch a camera snapshot using HTTP Digest authentication, with a 10-second timeout per HTTP request. Reuse the HTTP connection and Digest challenge when the camera permits it.
 2. Crop the configured gate region and resize the entire crop to 224 × 224 RGB pixels.
 3. Run `best.onnx` with ONNX Runtime using float32 NCHW input scaled to `[0, 1]`.
 4. Accept the highest-scoring class only when its confidence is **greater than 0.95**.
@@ -24,7 +24,7 @@ The loop runs continuously, with a one-second delay after errors. There is no fi
 
 ## Run the server
 
-Use Node.js 24 (matching the Docker image) and pnpm, or use Docker Compose.
+Use Rust 1.95 or later with Cargo and a native linker, or use Docker Compose. On Windows, use the MSVC Rust toolchain with the Visual C++ build tools. On Linux, use Debian 13 or an equivalent recent distribution to link against the prebuilt ONNX Runtime libraries. Cargo fetches these libraries on the first build.
 
 Before starting:
 
@@ -39,17 +39,15 @@ From the repository root, run these PowerShell commands:
 cd server
 Copy-Item .env.example .env
 New-Item -ItemType Directory -Force images/open, images/closed, images/not-confident
-pnpm install --frozen-lockfile
 ```
 
 Edit `.env` using the settings below, then start the server:
 
 ```powershell
-pnpm build
-pnpm start
+cargo run --release --locked
 ```
 
-For development, use `pnpm dev` to run the TypeScript source directly. Run commands from `server/`: the model, `.env`, and image paths are relative to the working directory.
+Run commands from `server/` because the model, `.env`, and image paths are relative to the working directory. Set `RUST_LOG=home_gate_detection=debug` for per-frame capture and classification timings.
 
 ### Configuration
 
@@ -62,13 +60,13 @@ For development, use `pnpm dev` to run the TypeScript source directly. Run comma
 | `CAMERA_CROP_TOP` | Required | Top edge of the gate crop, in source-image pixels. |
 | `CAMERA_CROP_WIDTH` | Required | Width of the gate crop, in pixels. |
 | `CAMERA_CROP_HEIGHT` | Required | Height of the gate crop, in pixels. |
-| `MQTT_HOST` | Optional | Broker host, optionally with a port, e.g. `192.168.1.10:1883`. The server prepends `mqtt://`; leave blank to run without MQTT. |
+| `MQTT_HOST` | Optional | Broker host with an optional port, e.g. `192.168.1.10:1883`. Leave blank to run without MQTT. |
 | `SAVE_OPEN_IMAGES` | `false` | Save every confident open crop. |
 | `SAVE_CLOSED_IMAGES` | `false` | Save a random 1% sample of confident closed crops. |
 | `DEBOUNCE_MAX_GAP_MS` | `5000` | Maximum gap between capture start times for matching readings to count toward confirmation. |
 | `STALE_STATE_TIMEOUT_MS` | `30000` | Expire the confirmed state when its supporting capture is this old. |
 
-The crop values in `.env.example` are specific to my camera. Use a rectangle within your snapshot bounds. Both timeout settings must be positive finite numbers. Image-saving flags accept `true` or `false` (case-insensitive).
+The crop values in `.env.example` are specific to my camera. Use a rectangle within your snapshot bounds. Both timeout settings must be positive finite numbers. Image-saving flags accept `true` or `false` (case-insensitive). Use single quotes around `.env` values that contain a literal `$`.
 
 Crops with no confident result are always saved to `images/not-confident/`, regardless of the flags. Other saved crops go to `images/open/` and `images/closed/`. The server does not create these directories or prune old images, so create them before starting and manage disk usage as needed.
 
@@ -81,7 +79,7 @@ docker compose up -d --build
 docker compose logs -f
 ```
 
-Compose builds the Node.js 24 image, loads `.env`, mounts `best.onnx` and `images/`, and restarts the service automatically. The container runs as the `node` user, which needs write access to the mounted image directories. Use a broker address reachable from the container; `localhost` refers to the container itself.
+Compose builds the Rust release binary, loads `.env`, mounts `best.onnx` and `images/`, and restarts the service automatically. The container user has UID and GID `1000` and needs write access to the mounted image directories. Use a broker address reachable from the container. Inside the container, `localhost` refers to the container itself.
 
 ## Home Assistant
 
@@ -147,7 +145,7 @@ Open [training/notebook.ipynb](training/notebook.ipynb) in Jupyter with `trainin
 5. Validate the best checkpoint using `GateClassificationValidator`.
 6. Export the best checkpoint to ONNX using the final cell, then copy the exported `best.onnx` to `server/best.onnx` and restart the server.
 
-[training/gate_transforms.py](training/gate_transforms.py) preserves the entire gate crop and stretches it to 224 × 224. Training adds mild color jitter, with no random cropping, flipping, or erasing. Validation uses the same resize and normalization as inference: RGB, CHW, and division by 255, without ImageNet normalization. PIL and Sharp resizing can produce slightly different pixels.
+[training/gate_transforms.py](training/gate_transforms.py) preserves the entire gate crop and stretches it to 224 × 224. Training adds mild color jitter, with no random cropping, flipping, or erasing. Validation and inference both use RGB pixels arranged in CHW order and divided by 255. The training and Rust server resize implementations can produce slightly different pixel values.
 
 Use the custom validator for standalone validation too. Generic Ultralytics prediction may apply different crops; use the server for deployed inference or explicitly apply the custom transforms. The notebook does not set a fixed epoch count and uses the installed Ultralytics defaults for unspecified training options.
 
@@ -167,8 +165,9 @@ If you change the classes, their order, or the input size, update the classifier
 Run from `server/`:
 
 ```sh
-pnpm test
-pnpm lint
+cargo fmt --check
+cargo test --locked
+cargo clippy --locked --all-targets -- -D warnings
 ```
 
-`pnpm test` compiles the TypeScript and runs the gate-state tests. `pnpm lint` runs TypeScript checking and ESLint.
+The gate-state tests cover confirmation, capture gaps, errors, stale readings, and recovery.
