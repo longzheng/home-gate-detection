@@ -1,54 +1,19 @@
 # syntax=docker/dockerfile:1
-
-# Build
-FROM node:24-slim AS build
+FROM rust:1.95-trixie AS build
 
 WORKDIR /app
-ENV PNPM_HOME="/pnpm"
-ENV PATH="$PNPM_HOME:$PATH"
-RUN corepack enable
+COPY Cargo.toml Cargo.lock ./
+COPY src ./src
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/app/target \
+    cargo build --release --locked && \
+    install -Dm755 target/release/home-gate-detection /out/home-gate-detection
 
-# Download dependencies as a separate step to take advantage of Docker's caching.
-# Leverage a cache mount to /pnpm/store to speed up subsequent builds.
-# Leverage bind mounts to package.json and pnpm-lock.yaml to avoid having to copy them into
-# into this layer.
-RUN --mount=type=bind,source=package.json,target=package.json \
-    --mount=type=bind,source=pnpm-lock.yaml,target=pnpm-lock.yaml \
-    --mount=type=bind,source=pnpm-workspace.yaml,target=pnpm-workspace.yaml \
-    --mount=type=cache,target=/pnpm/store \
-    pnpm install --frozen-lockfile
-
-# Copy the rest of the source files into the image.
-COPY . .
-
-RUN pnpm run build
-
-# Production
-FROM node:24-slim AS production
-
-ENV NODE_ENV=production
+FROM debian:trixie-slim
 
 WORKDIR /app
-ENV PNPM_HOME="/pnpm"
-ENV PATH="$PNPM_HOME:$PATH"
-RUN corepack enable
+RUN groupadd --gid 1000 gate && useradd --uid 1000 --gid 1000 gate
+COPY --from=build /out/home-gate-detection /usr/local/bin/home-gate-detection
 
-COPY --from=build /app/dist ./dist
-
-COPY package.json .
-
-# Download dependencies as a separate step to take advantage of Docker's caching.
-# Leverage a cache mount to /pnpm/store to speed up subsequent builds.
-# Leverage bind mounts to package.json and pnpm-lock.yaml to avoid having to copy them into
-# into this layer.
-RUN --mount=type=bind,source=package.json,target=package.json \
-    --mount=type=bind,source=pnpm-lock.yaml,target=pnpm-lock.yaml \
-    --mount=type=bind,source=pnpm-workspace.yaml,target=pnpm-workspace.yaml \
-    --mount=type=cache,target=/pnpm/store \
-    pnpm install --prod --frozen-lockfile
-
-# Run the application as a non-root user.
-USER node
-
-# Run the application.
-CMD ["node", "dist/index.js"]
+USER gate
+CMD ["home-gate-detection"]
